@@ -45,8 +45,6 @@ all:
 clean:
 	rm -rf build
 
-
-
 # TO-DO |
 #		.
 #		├── cork
@@ -71,3 +69,8 @@ clean:
 #		    └── vsh
 #	/	        ├── commands
 #	/	        └── vshmain
+
+# O : Done
+# . : Current
+# - : Do Soon
+# / : Future
