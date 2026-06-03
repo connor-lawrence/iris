@@ -1,6 +1,8 @@
 #include <efi.h>
 #include <efilib.h>
 
+// CUB v1.0
+
 EFI_STATUS EFIAPI efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
     InitializeLib(ImageHandle, SystemTable);
     Print(L"[CorK UEFI Bootloader] efilib library initalized...\n");
