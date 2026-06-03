@@ -1,9 +1,11 @@
 #include <efi.h>
 #include <efilib.h>
 
-#define KERNEL_FILE L"kernel.bin"
+#include "types.h"
 
 // CUB v1.0
+
+#define KERNEL_FILE L"kernel.bin"
 
 EFI_STATUS EFIAPI efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *uefi_services) {
 
@@ -12,7 +14,7 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *uefi_servi
 
     EFI_STATUS result;
 
-    EFI_LOADED_IMAGE *boot_info = NULL;
+    EFI_LOADED_IMAGE *efi_info = NULL;
     EFI_FILE_HANDLE root_directory;
     EFI_FILE_HANDLE kernel_file;
     UINTN kernel_info_buffer_size;
@@ -21,11 +23,11 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *uefi_servi
     UINTN kernel_size;
 
     // Get Boot Info
-    result = uefi_call_wrapper(BS->HandleProtocol, 3, image_handle, &gEfiLoadedImageProtocolGuid, (void**)&boot_info);
+    result = uefi_call_wrapper(BS->HandleProtocol, 3, image_handle, &gEfiLoadedImageProtocolGuid, (void**)&efi_info);
     if (EFI_ERROR(result)) {Print(L"[CUB] ! When getting boot info: %r\n", result);} else {Print(L"[CUB] Boot info pulled...\n");}
 
     // Open Root Directory
-    root_directory = LibOpenRoot(boot_info->DeviceHandle);
+    root_directory = LibOpenRoot(efi_info->DeviceHandle);
     Print(L"[CUB] Root directory opened...\n");
     if (!root_directory) {
         Print(L"[CUB] Failed to open root directory\n");
@@ -42,7 +44,7 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *uefi_servi
     if (EFI_ERROR(result)) {Print(L"[CUB] ! When allocating RAM for kernel info: %r\n", result);} else {Print(L"[CUB] RAM allocated for kernel info...\n");}
 
     // Get Kernel Info
-    result = uefi_call_wrapper(kernel_file->GetInfo, 4, kernel_file, &LoadedImageProtocol, &kernel_info_buffer_size, kernel_info);
+    result = uefi_call_wrapper(kernel_file->GetInfo, 4, kernel_file, &gEfiFileInfoGuid, &kernel_info_buffer_size, kernel_info);
     if (EFI_ERROR(result)) {Print(L"[CUB] ! When getting kernel info: %r\n", result);} else {Print(L"[CUB] Got kernel info...\n");}
     kernel_size = kernel_info->FileSize;
 
@@ -59,16 +61,24 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *uefi_servi
     if (EFI_ERROR(result)) {Print(L"[CUB] ! When closing kernel file: %r\n", result);} else {Print(L"[CUB] Kernel file closed...\n");}
 
     // Free Allocated RAM
-    result = uefi_call_wrapper(BS->FreePool, 1, kernel_buffer);
-    if (EFI_ERROR(result)) {Print(L"[CUB] ! When freeing allocated RAM for kernel buffer: %r\n", result);} else {Print(L"[CUB] Allocated RAM freed for kernel buffer...\n");}
     result = uefi_call_wrapper(BS->FreePool, 1, kernel_info);
     if (EFI_ERROR(result)) {Print(L"[CUB] ! When freeing allocated RAM for kernel info: %r\n", result);} else {Print(L"[CUB] Allocated RAM freed for kernel info...\n");}
 
+    // Passing Screen Info On To Kernel
+    EFI_GRAPHICS_OUTPUT_PROTOCOL *gop = NULL;
+    result = uefi_call_wrapper(uefi_services->BootServices->LocateProtocol, 3, &gEfiGraphicsOutputProtocolGuid, NULL, (void**)&gop);
+    if (EFI_ERROR(result) || !gop || !gop->Mode) {Print(L"[CUB] ! When freeing allocated RAM for kernel info: %r\n", result);} else {Print(L"[CUB] Allocated RAM freed for kernel info...\n");}
+    static BootInfo boot_info;
+    boot_info.framebuffer = (u64)gop->Mode->FrameBufferBase;
+    boot_info.width = gop->Mode->Info->HorizontalResolution;
+    boot_info.height = gop->Mode->Info->VerticalResolution;
+    boot_info.pixels_per_scanline = gop->Mode->Info->PixelsPerScanLine;
+    
     // Jump To Kernel
-    typedef void (*kernel_entry_t)(void);
+    typedef void (*kernel_entry_t)(BootInfo*);
     kernel_entry_t kernel_entry = (kernel_entry_t)kernel_buffer;
     Print(L"[CUB] Jumping to kernel... \n");
-    kernel_entry();
+    kernel_entry(&boot_info);
 
     return EFI_SUCCESS;
 }
