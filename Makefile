@@ -1,26 +1,55 @@
+KERNEL_DIR := cork
+BOOTLOADER := $(KERNEL_DIR)/arch/x86-64/boot/uefi/cub.c
+BOOTLOADER_GCC_FLAGS := -fno-stack-protector -fpic -fshort-wchar -mno-red-zone -DEFI_FUNCTION_WRAPPER -I /usr/include/efi -I /usr/include/efi/x86_64 
+BOOTLOADER_GCC_FLAGS += -I $(KERNEL_DIR)/include
+BOOTLOADER_LD_FLAGS := -nostdlib -T /usr/lib/elf_x86_64_efi.lds -shared -Bsymbolic -L /usr/lib -lgnuefi -lefi
+BOOTLOADER_OBJCOPY_FLAGS := -j .text -j .sdata -j .data -j .rodata -j .dynamic -j .dynsym -j .rel -j .rela -j .reloc --target=efi-app-x86_64
+
+KERNEL_FILES := $(shell find $(KERNEL_DIR) -name "*.c" ! -path "$(KERNEL_DIR)/arch/*")
+KERNEL_OBJ := $(patsubst $(KERNEL_DIR)/%.c,build/%.o,$(KERNEL_FILES))
+KERNEL_GCC_FLAGS := -c -ffreestanding -fno-stack-protector -mno-red-zone -m64 
+KERNEL_GCC_FLAGS += -I $(KERNEL_DIR)/include
+
+QEMU_FLAGS := -drive if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.fd \
+	-drive if=pflash,format=raw,file=build/OVMF_VARS.fd \
+	-drive format=raw,file=fat:rw:build -m 512 -debugcon stdio
+
 all: build/EFI/BOOT/BOOTX64.EFI build/kernel.bin
 
 build:
 	mkdir -p build
-	cp /usr/share/OVMF/OVMF_VARS_4M.fd build/OVMF_VARS.fd
 
-build/main.o: cork/arch/x86-64/boot/uefi/main.c | build
-	gcc $< -c -fno-stack-protector -fpic -fshort-wchar -mno-red-zone -DEFI_FUNCTION_WRAPPER -I /usr/include/efi -I /usr/include/efi/x86_64 -I cork/include -o $@
+# Build bootloader (BOOTX64.EFI)
 
-build/main.so: build/main.o
-	ld $< /usr/lib/crt0-efi-x86_64.o -nostdlib -T /usr/lib/elf_x86_64_efi.lds -shared -Bsymbolic -L /usr/lib -lgnuefi -lefi -o $@
+build/bootloader.o: $(BOOTLOADER) | build
+	gcc -c $(BOOTLOADER_GCC_FLAGS) $< -o $@
 
-build/EFI/BOOT/BOOTX64.EFI: build/main.so
+build/bootloader.so: build/bootloader.o
+	ld $< /usr/lib/crt0-efi-x86_64.o $(BOOTLOADER_LD_FLAGS) -o $@
+
+build/EFI/BOOT/BOOTX64.EFI: build/bootloader.so
 	mkdir -p build/EFI/BOOT
-	objcopy -j .text -j .sdata -j .data -j .rodata -j .dynamic -j .dynsym -j .rel -j .rela -j .reloc --target=efi-app-x86_64 $< $@
+	objcopy $(BOOTLOADER_OBJCOPY_FLAGS) $< $@
 
-build/kernel.bin: cork/core/core.c | build
-	gcc $< -c -ffreestanding -fno-stack-protector -mno-red-zone -m64 -I cork/include -o build/kernel.o
-	objcopy -O binary -j .text build/kernel.o $@
+# Build kernel (kernel.bin)
+
+build/%.o: cork/%.c | build
+	mkdir -p $(dir $@)
+	gcc $(KERNEL_GCC_FLAGS) $< -o $@
+
+build/kernel.bin: $(KERNEL_OBJ)
+	ld -Ttext 0x100000 -o build/kernel.elf $^
+	objcopy -O binary build/kernel.elf $@
+
+# Clean
 
 clean:
 	rm -rf build
 
-run: clean all
-		qemu-system-x86_64 -drive if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.fd -drive if=pflash,format=raw,file=build/OVMF_VARS.fd \
-	-drive format=raw,file=fat:rw:build -m 512 -debugcon stdio
+# Run QEMU VM
+
+build/OVMF_VARS.fd: /usr/share/OVMF/OVMF_VARS_4M.fd | build
+	cp $< $@
+
+run: clean all build/OVMF_VARS.fd
+	qemu-system-x86_64 $(QEMU_FLAGS)

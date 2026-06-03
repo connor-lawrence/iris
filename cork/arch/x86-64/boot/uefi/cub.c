@@ -3,7 +3,7 @@
 
 #include "types.h"
 
-// CUB v1.0
+// CUB v1.1
 
 #define KERNEL_FILE L"kernel.bin"
 
