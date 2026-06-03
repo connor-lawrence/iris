@@ -10,7 +10,7 @@
 EFI_STATUS EFIAPI efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *uefi_services) {
 
     InitializeLib(image_handle, uefi_services); // Initializes library
-    Print(L"[CUB] CUB initialized, efilib library initalized...\n");
+    Print(L"[CUB] CUB initialized, library initalized...\n");
 
     EFI_STATUS result;
 
@@ -67,7 +67,7 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *uefi_servi
     // Passing Screen Info On To Kernel
     EFI_GRAPHICS_OUTPUT_PROTOCOL *gop = NULL;
     result = uefi_call_wrapper(uefi_services->BootServices->LocateProtocol, 3, &gEfiGraphicsOutputProtocolGuid, NULL, (void**)&gop);
-    if (EFI_ERROR(result) || !gop || !gop->Mode) {Print(L"[CUB] ! When freeing allocated RAM for kernel info: %r\n", result);} else {Print(L"[CUB] Allocated RAM freed for kernel info...\n");}
+    if (EFI_ERROR(result) || !gop || !gop->Mode) {Print(L"[CUB] ! When passing screen info to kernel: %r\n", result);} else {Print(L"[CUB] Passed screen info on to kernel...\n");}
     static BootInfo boot_info;
     boot_info.framebuffer = (u64)gop->Mode->FrameBufferBase;
     boot_info.width = gop->Mode->Info->HorizontalResolution;
