@@ -1,5 +1,4 @@
-#ifndef TYPES_H
-#define TYPES_H
+#pragma once
 
 typedef unsigned char u8;
 typedef unsigned short u16;
@@ -20,5 +19,3 @@ typedef u64 qword;
 typedef u8 bool;
 #define true 1
 #define false 0
-
-#endif

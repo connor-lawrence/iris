@@ -1,6 +1,4 @@
-#ifndef CUB_H
-#define CUB_H
-
+#pragma once
 #include "types.h"
 
 typedef struct {
@@ -15,5 +13,3 @@ typedef struct {
 } BootInfo;
 
 typedef void (*kernel_entry_t)(BootInfo*);
-
-#endif
