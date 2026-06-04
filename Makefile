@@ -38,7 +38,7 @@ build/%.o: cork/%.c | build
 	gcc $(KERNEL_GCC_FLAGS) $< -o $@
 
 build/kernel.bin: $(KERNEL_OBJ)
-	ld -Ttext 0x100000 -o build/kernel.elf $^
+	ld -T linker.ld -o build/kernel.elf $^
 	objcopy -O binary build/kernel.elf $@
 
 # Clean
