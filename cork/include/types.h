@@ -21,11 +21,4 @@ typedef u8 bool;
 #define true 1
 #define false 0
 
-typedef struct {
-    u64 framebuffer;
-    u32 width;
-    u32 height;
-    u32 pixels_per_scanline;
-} BootInfo;
-
 #endif
