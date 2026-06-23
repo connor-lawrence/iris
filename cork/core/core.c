@@ -4,8 +4,6 @@
 
 void kernel_main(BootInfo* boot_info) {
     
-    init_framebuffer(boot_info);
-
     // Rainbow
     /*
     int i = 24;
