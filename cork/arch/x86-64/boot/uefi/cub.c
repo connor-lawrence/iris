@@ -6,98 +6,122 @@
 
 // CUB v2.0
 
-static EFI_STATUS load_kernel(EFI_HANDLE image_handle, void **file_buffer, UINTN *file_size);
+static EFI_STATUS load_kernel(EFI_HANDLE image_handle, void **kernel_buffer, UINTN *kernel_size);
 //static void start_kernel(void *kernel, BootInfo *boot_info);
 
 #define KERNEL_FILE L"kernel.elf"
 
-EFI_STATUS EFIAPI efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *uefi_services) {
+    static void debug(const char *s){while(*s)__asm__ volatile("outb %0,$0xE9"::"a"(*s++));}
+
+EFI_STATUS EFIAPI efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_table) {
+    
+    debug("\n[CUB v2] Initializing library...\n");
+
+    EFI_STATUS status;
 
     // Initialize library
-    InitializeLib(image_handle, uefi_services);
+    InitializeLib(image_handle, system_table);
     Print(L"[CUB v2] Booting...\n");
+        debug("[CUB v2] Booting...\n");
  
     void *kernel;
     UINTN size;
 
-    load_kernel(image_handle, &kernel, &size);
+    status = load_kernel(image_handle, &kernel, &size);
 
-    Print(L"[CUB v2] Loaded kernel size: %d\n", size);
-    
+    if (EFI_ERROR(status)) {
+        Print(L"[CUB v2] Kernel loading failed...\n");
+            debug("[CUB v2] Kernel loading failed...\n");
+        while (1);
+    }
+
+
+
+
+
+    //TEMPORARY
+    Print(L"[CUB v2] Loaded kernel size: %lu bytes...\n", size);
+        debug("[CUB v2] Found loaded kernel size...\n");
+
     UINT8 *bytes = (UINT8 *)kernel;
 
     if (bytes[0] != 0x7F ||
         bytes[1] != 'E' ||
         bytes[2] != 'L' ||
         bytes[3] != 'F') {
-
-        Print(L"[CUB v2] Not a valid ELF file\n");
-        while (1);
+        Print(L"[CUB v2] Not a valid ELF file...\n");
+            debug("[CUB v2] Not a valid ELF file...\n");
+    } else {
+        Print(L"[CUB v2] Valid ELF file detected...\n");
+            debug("[CUB v2] Valid ELF file detected...\n");
     }
+    //END TEMPORARY
 
-    Print(L"[CUB v2] ELF OK!\n");
+
+
+
 
     Print(L"[CUB v2] Halted.\n");
+        debug("[CUB v2] Halted.\n\n");
 
     while (1);
-    return EFI_SUCCESS;
+    //return EFI_SUCCESS;
 }
 
-static EFI_STATUS load_kernel(EFI_HANDLE image_handle, void **file_buffer, UINTN *file_size) {
+static EFI_STATUS load_kernel(EFI_HANDLE image_handle, void **kernel_buffer, UINTN *kernel_size) {
     
-    EFI_STATUS outcome;
+    EFI_STATUS status;
     EFI_LOADED_IMAGE *loaded_image;
     EFI_FILE_HANDLE root_directory;
-    EFI_FILE_HANDLE file;
-    EFI_FILE_INFO *file_info;
-    UINTN info_size;
-    //UINTN file_size;
+    EFI_FILE_HANDLE kernel_file;
+    EFI_FILE_INFO *kernel_info;
+    UINTN kernel_info_size;
 
-    // Get boot info
-    outcome = uefi_call_wrapper(BS->HandleProtocol, 3, image_handle, &gEfiLoadedImageProtocolGuid, (void**)&loaded_image);
-    if (EFI_ERROR(outcome)) return outcome;
+    // Get loaded image info
+    status = uefi_call_wrapper(BS->HandleProtocol, 3, image_handle, &gEfiLoadedImageProtocolGuid, (void**)&loaded_image);
+    if (EFI_ERROR(status)) return status;
     
     // Open root directory
     root_directory = LibOpenRoot(loaded_image->DeviceHandle);
     if (!root_directory) {return EFI_DEVICE_ERROR;}
     
     // Open kernel file
-    outcome = uefi_call_wrapper(root_directory->Open, 5, root_directory, &file, KERNEL_FILE, EFI_FILE_MODE_READ, 0);
-    if (EFI_ERROR(outcome)) return outcome;
+    status = uefi_call_wrapper(root_directory->Open, 5, root_directory, &kernel_file, KERNEL_FILE, EFI_FILE_MODE_READ, 0);
+    if (EFI_ERROR(status)) return status;
     
     // Allocate RAM for kernel info
-    info_size = sizeof(EFI_FILE_INFO) + 200;
-    outcome = uefi_call_wrapper(BS->AllocatePool, 3, EfiLoaderData, info_size, (void**)&file_info);
-    if (EFI_ERROR(outcome)) return outcome;
+    kernel_info_size = sizeof(EFI_FILE_INFO) + 200;
+    status = uefi_call_wrapper(BS->AllocatePool, 3, EfiLoaderData, kernel_info_size, (void**)&kernel_info);
+    if (EFI_ERROR(status)) return status;
     
     // Get kernel info
-    outcome = uefi_call_wrapper(file->GetInfo, 4, file, &gEfiFileInfoGuid, &info_size, file_info);
-    if (EFI_ERROR(outcome)) return outcome;
+    status = uefi_call_wrapper(kernel_file->GetInfo, 4, kernel_file, &gEfiFileInfoGuid, &kernel_info_size, kernel_info);
+    if (EFI_ERROR(status)) return status;
     
     // Allocate RAM for kernel
-    *file_size = file_info->FileSize;
-    outcome = uefi_call_wrapper(BS->AllocatePool, 3, EfiLoaderCode, *file_size, (void**)file_buffer);
-    if (EFI_ERROR(outcome)) return outcome;
+    *kernel_size = kernel_info->FileSize;
+    status = uefi_call_wrapper(BS->AllocatePool, 3, EfiLoaderCode, *kernel_size, (void**)kernel_buffer);
+    if (EFI_ERROR(status)) return status;
     
-    // Copy kernel to RAM
-    outcome = uefi_call_wrapper(file->Read, 3, file, file_size, *file_buffer);
-    if (EFI_ERROR(outcome)) return outcome;
+    // Read kernel into allocated RAM
+    status = uefi_call_wrapper(kernel_file->Read, 3, kernel_file, kernel_size, *kernel_buffer);
+    if (EFI_ERROR(status)) return status;
     
     // Close kernel file and free allocated RAM from info
-    uefi_call_wrapper(file->Close, 1, file);
-    uefi_call_wrapper(BS->FreePool, 1, file_info);
+    uefi_call_wrapper(kernel_file->Close, 1, kernel_file);
+    uefi_call_wrapper(BS->FreePool, 1, kernel_info);
     
-    return outcome;
+    return status;
 }
 /*
 static EFI_STATUS setup_framebuffer(BootInfo *boot_info) {
 
-    EFI_STATUS outcome;
+    EFI_STATUS status;
     EFI_GRAPHICS_OUTPUT_PROTOCOL *gop = NULL;
 
     // Initialize GOP
-    outcome = uefi_call_wrapper(BS->LocateProtocol, 3, &gEfiGraphicsOutputProtocolGuid, NULL, (void**)&gop);
-    if (EFI_ERROR(outcome)) return outcome;
+    status = uefi_call_wrapper(BS->LocateProtocol, 3, &gEfiGraphicsOutputProtocolGuid, NULL, (void**)&gop);
+    if (EFI_ERROR(status)) return status;
 
     // Fill boot info with framebuffer info
     boot_info->framebuffer.address = (u64)gop->Mode->FrameBufferBase;
