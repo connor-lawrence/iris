@@ -1,7 +1,6 @@
 #include "core.h"
 #include "types.h"
 #include "cub.h"
-#include "framebuffer.h"
 
 void kernel_main(BootInfo* boot_info) {
     
