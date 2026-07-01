@@ -58,9 +58,14 @@ clean:
 # Run QEMU VM
 QEMU_FLAGS := -drive if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.fd \
 	-drive if=pflash,format=raw,file=$(BUILD_DIR)/OVMF_VARS.fd \
-	-drive format=raw,file=fat:rw:$(BUILD_DIR) -m 512 -debugcon stdio
+	-drive format=raw,file=fat:rw:$(BUILD_DIR) -m 512
 
 run: clean all
 	rm -f $(BUILD_DIR)/OVMF_VARS.fd
 	cp /usr/share/OVMF/OVMF_VARS_4M.fd $(BUILD_DIR)/OVMF_VARS.fd
-	qemu-system-x86_64 $(QEMU_FLAGS)
+	qemu-system-x86_64 $(QEMU_FLAGS) -debugcon stdio
+
+run-c: clean all
+	rm -f $(BUILD_DIR)/OVMF_VARS.fd
+	cp /usr/share/OVMF/OVMF_VARS_4M.fd $(BUILD_DIR)/OVMF_VARS.fd
+	qemu-system-x86_64 $(QEMU_FLAGS) -nographic
