@@ -22,7 +22,7 @@ BOOTLOADER_GCC_FLAGS := -fno-stack-protector -fpic -fshort-wchar -mno-red-zone -
 BOOTLOADER_LD_FLAGS := -nostdlib -T /usr/lib/elf_x86_64_efi.lds -shared -Bsymbolic -L /usr/lib -lgnuefi -lefi
 BOOTLOADER_OBJCOPY_FLAGS := -j .text -j .sdata -j .data -j .rodata -j .dynamic -j .dynsym -j .rel -j .rela -j .reloc --target=efi-app-x86_64
 
-all: $(BOOT_EFI) $(KERNEL_ELF)
+all: $(BOOT_EFI) $(KERNEL_ELF) $(BUILD_DIR)/OVMF_VARS.fd
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
@@ -60,12 +60,14 @@ QEMU_FLAGS := -drive if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_
 	-drive if=pflash,format=raw,file=$(BUILD_DIR)/OVMF_VARS.fd \
 	-drive format=raw,file=fat:rw:$(BUILD_DIR) -m 512
 
-run: clean all
+$(BUILD_DIR)/OVMF_VARS.fd:
 	rm -f $(BUILD_DIR)/OVMF_VARS.fd
-	cp /usr/share/OVMF/OVMF_VARS_4M.fd $(BUILD_DIR)/OVMF_VARS.fd
+	cp /usr/share/OVMF/OVMF_VARS_4M.fd $@
+
+run:
+	sudo chown -R $(USER):$(USER) $(BUILD_DIR)
 	qemu-system-x86_64 $(QEMU_FLAGS) -debugcon stdio
 
-run-c: clean all
-	rm -f $(BUILD_DIR)/OVMF_VARS.fd
-	cp /usr/share/OVMF/OVMF_VARS_4M.fd $(BUILD_DIR)/OVMF_VARS.fd
+run-c:
+	sudo chown -R $(USER):$(USER) $(BUILD_DIR)
 	qemu-system-x86_64 $(QEMU_FLAGS) -nographic

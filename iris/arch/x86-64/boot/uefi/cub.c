@@ -33,14 +33,49 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_tab
 
     ////////////////////////////////////////////////////// TEMPORARY
 
-    // Get and print ELF executable header
+    // Get ELF executable header and program header
     Elf64_Executable_Header *e_header = (Elf64_Executable_Header *)kernel;
-    Print(L"[CUB v2] ELF magic number: 0x%x %c %c %c, ", e_header->e_ident[0], e_header->e_ident[1], e_header->e_ident[2], e_header->e_ident[3]);
+    Elf64_Program_Header *p_header = (Elf64_Program_Header *)((u8 *)kernel + e_header->e_phoff);
 
     // Check magic number
+    Print(L"[CUB v2] ELF magic number: 0x%x %c %c %c, ", e_header->e_ident[0], e_header->e_ident[1], e_header->e_ident[2], e_header->e_ident[3]);
     if (e_header->e_ident[0] == 0x7F && e_header->e_ident[1] == 'E' && e_header->e_ident[2] == 'L' && e_header->e_ident[3] == 'F') {
         Print(L"Valid ELF file detected.\n");
-    } else { Print(L"Not a valid ELF file.\n"); }
+    } else {
+        Print(L"Not a valid ELF file.\n");
+        while (1);
+    }
+
+    Print(L"[CUB v2] Segments: %u...\n", e_header->e_phnum);
+
+    // Load kernel segments
+    for (u64 i = 0; i < e_header->e_phnum; i++) {
+        if (p_header[i].p_type != 1) continue; // PT_LOAD = 1
+
+        Print(L"[CUB v2] Loading segment %u...\n", i);
+
+        u8 *source = (u8 *)kernel + p_header[i].p_offset;
+        u8 *destination = (u8 *)p_header[i].p_vaddr;
+
+        for (u64 j = 0; j < p_header[i].p_filesz; j++) {
+            destination[j] = source[j];
+        }
+
+        for (u64 j = p_header[i].p_filesz; j < p_header[i].p_memsz; j++) {
+            destination[j] = 0;
+        }
+
+        Print(L"[CUB v2] Segment loaded at 0x%lx\n", p_header[i].p_vaddr);
+
+    }
+
+
+    Print(L"[CUB v2] Jumping to kernel...\n");
+
+    void (*kernel_entry)(void) = (void (*)(void))e_header->e_entry;
+
+    kernel_entry();
+
 
     ////////////////////////////////////////////////////// END OF TEMPORARY
 
