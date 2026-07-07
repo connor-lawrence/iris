@@ -1,7 +1,7 @@
 .PHONY: all clean run
 
 # Directory placeholders
-KERNEL_DIR := cork
+KERNEL_DIR := iris
 BUILD_DIR := build
 BOOT_DIR := $(BUILD_DIR)/EFI/BOOT
 
