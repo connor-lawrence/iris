@@ -12,7 +12,7 @@ BOOT_EFI := $(BOOT_DIR)/BOOTX64.EFI
 # Sources
 KERNEL_FILES := $(shell find $(KERNEL_DIR) -name "*.c" ! -path "$(KERNEL_DIR)/arch/*")
 KERNEL_OBJ := $(patsubst $(KERNEL_DIR)/%.c,$(BUILD_DIR)/%.o,$(KERNEL_FILES))
-BOOTLOADER := $(KERNEL_DIR)/arch/x86-64/boot/uefi/cub.c
+BOOTLOADER := $(KERNEL_DIR)/arch/x86_64/boot/uefi/cub.c
 
 # Flags
 KERNEL_GCC_FLAGS := -c -ffreestanding -fno-stack-protector -mno-red-zone -m64 \
@@ -37,7 +37,7 @@ $(BUILD_DIR)/%.o: $(KERNEL_DIR)/%.c | $(BUILD_DIR)
 
 # Link kernel files
 $(KERNEL_ELF): $(KERNEL_OBJ)
-	ld -T linker.ld -o $@ $^
+	ld -T iris/arch/x86_64/linker.ld -o $@ $^
 
 # Compile bootloader into an object file
 $(BUILD_DIR)/bootloader.o: $(BOOTLOADER) | $(BUILD_DIR)

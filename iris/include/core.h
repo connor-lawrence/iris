@@ -2,4 +2,4 @@
 #include "types.h"
 #include "cub.h"
 
-void kernel_main();
+__attribute__((ms_abi)) void kernel_main(void);
