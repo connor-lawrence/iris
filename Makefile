@@ -1,4 +1,4 @@
-.PHONY: all clean run
+.PHONY: all clean run run-c
 
 # Directory placeholders
 KERNEL_DIR := iris
@@ -10,8 +10,14 @@ KERNEL_ELF := $(BUILD_DIR)/kernel.elf
 BOOT_EFI := $(BOOT_DIR)/BOOTX64.EFI
 
 # Sources
-KERNEL_FILES := $(shell find $(KERNEL_DIR) -name "*.c" ! -path "$(KERNEL_DIR)/arch/*")
-KERNEL_OBJ := $(patsubst $(KERNEL_DIR)/%.c,$(BUILD_DIR)/%.o,$(KERNEL_FILES))
+KERNEL_C_FILES := $(shell find $(KERNEL_DIR) -name "*.c" ! -path "$(KERNEL_DIR)/arch/*/boot/uefi/*")
+KERNEL_S_FILES := $(shell find $(KERNEL_DIR) -name "*.s" ! -path "$(KERNEL_DIR)/arch/*/boot/uefi/*")
+
+KERNEL_C_OBJ := $(patsubst $(KERNEL_DIR)/%.c,$(BUILD_DIR)/%.o,$(KERNEL_C_FILES))
+KERNEL_S_OBJ := $(patsubst $(KERNEL_DIR)/%.s,$(BUILD_DIR)/%.o,$(KERNEL_S_FILES))
+
+KERNEL_OBJ := $(KERNEL_C_OBJ) $(KERNEL_S_OBJ)
+
 BOOTLOADER := $(KERNEL_DIR)/arch/x86_64/boot/uefi/cub.c
 
 # Flags
@@ -30,8 +36,13 @@ $(BUILD_DIR):
 $(BOOT_DIR):
 	mkdir -p $(BOOT_DIR)
 
-# Compile kernel files
+# Compile kernel C files
 $(BUILD_DIR)/%.o: $(KERNEL_DIR)/%.c | $(BUILD_DIR)
+	mkdir -p $(dir $@)
+	gcc $(KERNEL_GCC_FLAGS) $< -o $@
+
+# Assemble kernel assembly files
+$(BUILD_DIR)/%.o: $(KERNEL_DIR)/%.s | $(BUILD_DIR)
 	mkdir -p $(dir $@)
 	gcc $(KERNEL_GCC_FLAGS) $< -o $@
 
@@ -69,5 +80,4 @@ run:
 	qemu-system-x86_64 $(QEMU_FLAGS) -debugcon stdio
 
 run-c:
-	sudo chown -R $(USER):$(USER) $(BUILD_DIR)
 	qemu-system-x86_64 $(QEMU_FLAGS) -nographic

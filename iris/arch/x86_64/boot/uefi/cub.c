@@ -2,172 +2,239 @@
 #include <efilib.h>
 
 #include "types.h"
-#include "cub.h"
+#include "cub.h" ////////////////////////////////////////////// FIX COMMENTS!!!!!!!
 
-// CUB v2.0
+// CUB v2.1
 #define KERNEL_FILE L"kernel.elf"
 
-// Function declerations
-static EFI_STATUS load_kernel(EFI_HANDLE image_handle, void **kernel, u64 *kernel_size);
-static EFI_STATUS load_elf(void *kernel, u64 kernel_size, void (**kernel_entry)(void));
+// Function declarations
+static EFI_STATUS read_file(EFI_HANDLE image_handle, void **file_image, u64 *file_size);
+static EFI_STATUS validate_elf(void *file_image, u64 file_size);
+static EFI_STATUS load_elf(void *file_image, u64 file_size, void (**entry)(void));
+// static EFI_STATUS fill_boot_metadata();
+
+// Helper function declarations
+static void copy_memory(void *destination, const void *source, u64 size);
+static void set_memory(void *destination, u8 value, u64 size);
 
 EFI_STATUS efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_table) {
 
-    EFI_STATUS status;
-
     // Initialize library
     InitializeLib(image_handle, system_table);
-    Print(L"\n[CUB v2] Custom UEFI Bootloader initialized...\n");
 
-    // Load kernel into memory
-    Print(L"[CUB v2] Loading kernel ELF blob into memory...\n");
-
-    void *kernel;
+    EFI_STATUS status;
+    void *kernel_image;
     u64 kernel_size;
-
-    status = load_kernel(image_handle, &kernel, &kernel_size);
-
-    if (EFI_ERROR(status)) {
-        Print(L"[CUB v2] Kernel blob loading failed: %r...\n", status);
-        return status;
-    }
-    
-    Print(L"[CUB v2] Kernel loaded: %lu bytes.\n", kernel_size);
-    
-    // Parse and load ELF
-    Print(L"[CUB v2] Parsing and loading ELF...\n");
-
     void (*kernel_entry)(void);
 
-    status = load_elf(kernel, kernel_size, &kernel_entry);
+    status = read_file(image_handle, &kernel_image, &kernel_size);
+    if (EFI_ERROR(status)) return status;
 
-    if (EFI_ERROR(status)) {
-        Print(L"[CUB v2] ELF loading failed: %r...\n", status);
-        return status;
-    }
+    status = validate_elf(kernel_image, kernel_size);
+    if (EFI_ERROR(status)) return status;
 
-    Print(L"[CUB v2] Jumping to kernel...\n");
+    status = load_elf(kernel_image, kernel_size, &kernel_entry);
+    if (EFI_ERROR(status)) return status;
+    
+    // * Fill boot_metadata (later)
+    // * Exit services (also later)
 
     kernel_entry();
-
-    Print(L"[CUB v2] Finished, returning.\n");
 
     return EFI_SUCCESS;
 
 }
 
-static EFI_STATUS load_kernel(EFI_HANDLE image_handle, void **kernel, u64 *kernel_file_size) {
+static EFI_STATUS read_file(EFI_HANDLE image_handle, void **file_image, u64 *file_size) {
 
     EFI_STATUS status;
-    *kernel = NULL;
-    *kernel_file_size = 0;
+    *file_image = NULL;
+    *file_size = 0;
 
     EFI_LOADED_IMAGE *loaded_image = NULL;
     EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *filesystem = NULL;
     EFI_FILE_PROTOCOL *root_directory = NULL;
-    EFI_FILE_PROTOCOL *kernel_file = NULL;
-    u64 kernel_file_info_size = 0;
-    EFI_FILE_INFO *kernel_file_info = NULL;
+    EFI_FILE_PROTOCOL *file = NULL;
+    u64 file_metadata_size = 0;
+    EFI_FILE_INFO *file_metadata = NULL;
 
-    // Get loaded image (and device handle)
+    // Get loaded image metadata
     status = uefi_call_wrapper(BS->HandleProtocol, 3, image_handle, &gEfiLoadedImageProtocolGuid, (void **)&loaded_image);
-    if (EFI_ERROR(status)) goto ocp;
+    if (EFI_ERROR(status)) goto oc;
 
-    // Get filesystem protocol
+    // Get filesystem handle
     status = uefi_call_wrapper(BS->HandleProtocol, 3, loaded_image->DeviceHandle, &gEfiSimpleFileSystemProtocolGuid, (void **)&filesystem);
-    if (EFI_ERROR(status)) goto ocp;
+    if (EFI_ERROR(status)) goto oc;
 
-    // Open root_directory
+    // Open root directory
     status = uefi_call_wrapper(filesystem->OpenVolume, 2, filesystem, &root_directory);
-    if (EFI_ERROR(status)) goto ocp;
+    if (EFI_ERROR(status)) goto oc;
 
-    // Open kernel file
-    status = uefi_call_wrapper(root_directory->Open, 5, root_directory, &kernel_file, KERNEL_FILE, EFI_FILE_MODE_READ, 0);
-    if (EFI_ERROR(status)) goto ocp;
+    // Open file
+    status = uefi_call_wrapper(root_directory->Open, 5, root_directory, &file, KERNEL_FILE, EFI_FILE_MODE_READ, 0);
+    if (EFI_ERROR(status)) goto oc;
 
-    // Get size of kernel file info by failing successfully
-    status = uefi_call_wrapper(kernel_file->GetInfo, 4, kernel_file, &gEfiFileInfoGuid, &kernel_file_info_size, NULL);
-    if (EFI_ERROR(status) && status != EFI_BUFFER_TOO_SMALL) goto ocp;
+    // Get the size of the file metadata by failing successfully
+    status = uefi_call_wrapper(file->GetInfo, 4, file, &gEfiFileInfoGuid, &file_metadata_size, NULL);
+    if (status != EFI_BUFFER_TOO_SMALL) goto oc;
 
-    // Allocate memory for kernel file info
-    status = uefi_call_wrapper(BS->AllocatePool, 3, EfiLoaderData, kernel_file_info_size, (void **)&kernel_file_info);
-    if (EFI_ERROR(status)) goto ocp;
+    // Allocate memory for file metadata
+    status = uefi_call_wrapper(BS->AllocatePool, 3, EfiLoaderData, file_metadata_size, (void **)&file_metadata);
+    if (EFI_ERROR(status)) goto oc;
+
+    // Get file metadata
+    status = uefi_call_wrapper(file->GetInfo, 4, file, &gEfiFileInfoGuid, &file_metadata_size, file_metadata);
+    if (EFI_ERROR(status)) goto oc;
+
+    *file_size = file_metadata->FileSize;
+
+    // Allocate memory for file
+    status = uefi_call_wrapper(BS->AllocatePool, 3, EfiLoaderData, *file_size, file_image);
+    if (EFI_ERROR(status)) goto oc;
+
+    // Read file into memory
+    status = uefi_call_wrapper(file->Read, 3, file, file_size, *file_image);
+    if (EFI_ERROR(status)) goto oc;
+
+    // Check if the read got the expected size
+    if (*file_size != file_metadata->FileSize) {
+        status = EFI_LOAD_ERROR;
+        goto oc;
+    }
     
-    // Get kernel file info
-    status = uefi_call_wrapper(kernel_file->GetInfo, 4, kernel_file, &gEfiFileInfoGuid, &kernel_file_info_size, kernel_file_info);
-    if (EFI_ERROR(status)) goto ocp;
-
-    // Get (and return) kernel file size from kernel file info
-    *kernel_file_size = kernel_file_info->FileSize;
-
-    // Allocate memory for kernel file
-    status = uefi_call_wrapper(BS->AllocatePool, 3, EfiLoaderData, *kernel_file_size, kernel);
-    if (EFI_ERROR(status)) goto ocp;
-
-    // Read kernel file into memory
-    status = uefi_call_wrapper(kernel_file->Read, 3, kernel_file, &kernel_file_size, *kernel);
-    if (EFI_ERROR(status)) goto ocp;
-
-    // Close kernel file and free allocated RAM from info
-    uefi_call_wrapper(kernel_file->Close, 1, kernel_file);
+    // Close file, close root directory, and free memory for file metadata
+    uefi_call_wrapper(file->Close, 1, file);
     uefi_call_wrapper(root_directory->Close, 1, root_directory);
-    uefi_call_wrapper(BS->FreePool, 1, kernel_file_info);
+    uefi_call_wrapper(BS->FreePool, 1, file_metadata);
+    file = NULL;
+    root_directory = NULL;
+    file_metadata = NULL;
 
     return EFI_SUCCESS;
-
-    // Oh Crap Program
-    ocp:
-    if (*kernel) uefi_call_wrapper(BS->FreePool, 1, *kernel);
-    if (kernel_file_info) uefi_call_wrapper(BS->FreePool, 1, kernel_file_info);
-    if (kernel_file) uefi_call_wrapper(kernel_file->Close, 1, kernel_file);
+    
+    // Optional cleanup
+    oc:
+    if (*file_image) uefi_call_wrapper(BS->FreePool, 1, *file_image);
+    if (file_metadata) uefi_call_wrapper(BS->FreePool, 1, file_metadata);
+    if (file) uefi_call_wrapper(file->Close, 1, file);
     if (root_directory) uefi_call_wrapper(root_directory->Close, 1, root_directory);
     return status;
+
 }
 
-static EFI_STATUS load_elf(void *kernel, u64 kernel_size, void (**kernel_entry)(void)) {
+static EFI_STATUS validate_elf(void *file_image, u64 file_size) {
 
-    // Get ELF executable header and program header
-    Elf64_Executable_Header *e_header = (Elf64_Executable_Header *)kernel;
-    Elf64_Program_Header *p_header = (Elf64_Program_Header *)((u8 *)kernel + e_header->e_phoff);
-
-    // Check magic number and size
-    Print(L"[CUB v2] ELF magic number: 0x%x %c %c %c, ", e_header->e_ident[0], e_header->e_ident[1], e_header->e_ident[2], e_header->e_ident[3]);
-    if (e_header->e_ident[0] == 0x7F && e_header->e_ident[1] == 'E' && e_header->e_ident[2] == 'L' && e_header->e_ident[3] == 'F') {
-        Print(L"Valid ELF file detected...\n");
-    } else {
-        Print(L"Not a valid ELF file.\n");
+    // Check if the file is large enough to contain the executable header
+    if (file_size < sizeof(Elf64_Executable_Header)) {
         return EFI_LOAD_ERROR;
     }
 
-    if (e_header->e_phoff + e_header->e_phnum * sizeof(Elf64_Program_Header) <= kernel_size) {
-        Print(L"[CUB v2] Sizes checked, valid ELF file detected...\n");
-    } else {
-        Print(L"[CUB v2] Sizes checked, not a valid ELF file.\n");
+    Elf64_Executable_Header *e_header = (Elf64_Executable_Header *)file_image;
+
+    // Check ELF magic number
+    if (e_header->e_ident[0] != 0x7F || e_header->e_ident[1] != 'E' || e_header->e_ident[2] != 'L' || e_header->e_ident[3] != 'F') {
         return EFI_LOAD_ERROR;
     }
 
-    // Load kernel segments
+    // Check if the ELF is 64-bit
+    if (e_header->e_ident[4] != 2) {
+        return EFI_LOAD_ERROR;
+    }
+
+    // Ckeck if the ELF is for x86_64 architecture
+    if (e_header->e_machine != 0x3E) {
+        return EFI_LOAD_ERROR;
+    }
+
+    // Check if the file is large enough to contain the program headers
+    if (e_header->e_phoff > file_size || e_header->e_phnum > (file_size - e_header->e_phoff) / e_header->e_phentsize) {
+        return EFI_LOAD_ERROR;
+    }
+
+    // Check if the program headers' sizes match what is described in the executable header
+    if (e_header->e_phentsize != sizeof(Elf64_Program_Header)) {
+        return EFI_LOAD_ERROR;
+    }
+
+    Elf64_Program_Header *p_headers = (Elf64_Program_Header *)((u8 *)file_image + e_header->e_phoff);
+
+    // Check if at least one segment will be loaded (PT_LOAD)
     for (u64 i = 0; i < e_header->e_phnum; i++) {
-        if (p_header[i].p_type != 1) continue; // PT_LOAD = 1
-
-        u8 *source = (u8 *)kernel + p_header[i].p_offset;
-        u8 *destination = (u8 *)p_header[i].p_vaddr;
-
-        // Load segment
-        for (u64 j = 0; j < p_header[i].p_filesz; j++) {
-            destination[j] = source[j];
+        if (p_headers[i].p_type == 1) {
+            break;
+        } else if (i == e_header->e_phnum - 1) {
+            return EFI_LOAD_ERROR;
         }
-
-        // Fill BSS with zeroes
-        for (u64 j = p_header[i].p_filesz; j < p_header[i].p_memsz; j++) {
-            destination[j] = 0;
-        }
-
-        Print(L"[CUB v2] Segment %ld loaded at 0x%lx.\n", i, p_header[i].p_vaddr);
     }
+    
+    for (u64 i = 0; i < e_header->e_phnum; i++) {
 
-    *kernel_entry = (void (*)(void))e_header->e_entry;
+        if (p_headers[i].p_type != 1) {
+            continue;
+        }
+
+        // Check if each segment will fit in the file
+        if (p_headers[i].p_offset + p_headers[i].p_filesz > file_size) {
+            return EFI_LOAD_ERROR;
+        }
+
+        // Check if BSS in each segment is not negative (data > space)
+        if (p_headers[i].p_memsz < p_headers[i].p_filesz) {
+            return EFI_LOAD_ERROR;
+        }
+
+    }
 
     return EFI_SUCCESS;
+
+}
+
+static EFI_STATUS load_elf(void *file_image, u64 file_size, void (**entry)(void)) {
+
+    Elf64_Executable_Header *e_header = (Elf64_Executable_Header *)file_image;
+    Elf64_Program_Header *p_headers = (Elf64_Program_Header *)((u8 *)file_image + e_header->e_phoff);
+    
+    for (u64 i = 0; i < e_header->e_phnum; i++) {
+    
+        // Skip segments that aren't PT_LOAD
+        if (p_headers[i].p_type != 1) {
+            continue;
+        }
+
+        u8 *source = (u8 *)file_image + p_headers[i].p_offset;
+        u8 *destination = (u8 *)p_headers[i].p_vaddr;
+
+        // Copy segment
+        copy_memory(destination, source, p_headers[i].p_filesz);
+
+        // Fill BSS
+        set_memory(destination + p_headers[i].p_filesz, 0, p_headers[i].p_memsz - p_headers[i].p_filesz);
+    
+    }
+    
+    // Return entry
+    *entry = (void (*)(void))e_header->e_entry; 
+
+    return EFI_SUCCESS;
+}
+
+static void copy_memory(void *destination, const void *source, u64 size) {
+
+    u8 *destination_bytes = (u8 *)destination;
+    const u8 *source_bytes = (const u8 *)source;
+
+    for (u64 i = 0; i < size; i++) {
+        destination_bytes[i] = source_bytes[i];
+    }
+
+}
+
+static void set_memory(void *destination, u8 value, u64 size) {
+
+    u8 *destination_bytes = (u8 *)destination;
+
+    for (u64 i = 0; i < size; i++) {
+        destination_bytes[i] = value;
+    }
 
 }
