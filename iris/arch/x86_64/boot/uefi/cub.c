@@ -2,7 +2,7 @@
 #include <efilib.h>
 
 #include "types.h"
-#include "cub.h" ////////////////////////////////////////////// FIX COMMENTS!!!!!!!
+#include "cub.h"
 
 // CUB v2.1
 #define KERNEL_FILE L"kernel.elf"
