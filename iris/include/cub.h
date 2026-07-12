@@ -38,4 +38,11 @@ typedef struct {
         u32 pitch;
     } framebuffer;
 
+    struct {
+        void *map;
+        u64 size;
+        u64 descriptor_size;
+        u64 descriptor_version;
+    } memory_map;
+
 } BootInfo;

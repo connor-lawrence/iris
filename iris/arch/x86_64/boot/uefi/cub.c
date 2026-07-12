@@ -10,8 +10,9 @@
 // Function declarations
 static EFI_STATUS read_file(EFI_HANDLE image_handle, void **file_image, u64 *file_size);
 static EFI_STATUS validate_elf(void *file_image, u64 file_size);
-static EFI_STATUS load_elf(void *file_image, u64 file_size, void (**entry)(void));
-// static EFI_STATUS fill_boot_metadata();
+static EFI_STATUS load_elf(void *file_image, void (**kernel_entry)(BootInfo *));
+static EFI_STATUS get_framebuffer(EFI_HANDLE image_handle, BootInfo *boot_info);
+static EFI_STATUS exit_boot_services(EFI_HANDLE image_handle, BootInfo *boot_info);
 
 // Helper function declarations
 static void copy_memory(void *destination, const void *source, u64 size);
@@ -25,7 +26,13 @@ EFI_STATUS efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_table) {
     EFI_STATUS status;
     void *kernel_image;
     u64 kernel_size;
-    void (*kernel_entry)(void);
+    void (*kernel_entry)(BootInfo *boot_info);
+    BootInfo *boot_info = NULL;
+
+    status = uefi_call_wrapper(BS->AllocatePool, 3, EfiLoaderData, sizeof(BootInfo), (void **)&boot_info);
+    if (EFI_ERROR(status)) return status;
+
+    set_memory(boot_info, 0, sizeof(BootInfo));
 
     status = read_file(image_handle, &kernel_image, &kernel_size);
     if (EFI_ERROR(status)) return status;
@@ -33,13 +40,16 @@ EFI_STATUS efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_table) {
     status = validate_elf(kernel_image, kernel_size);
     if (EFI_ERROR(status)) return status;
 
-    status = load_elf(kernel_image, kernel_size, &kernel_entry);
+    status = load_elf(kernel_image, &kernel_entry);
     if (EFI_ERROR(status)) return status;
-    
-    // * Fill boot_metadata (later)
-    // * Exit services (also later)
 
-    kernel_entry();
+    status = get_framebuffer(image_handle, boot_info);
+    if (EFI_ERROR(status)) return status;
+
+    status = exit_boot_services(image_handle, boot_info);
+    if (EFI_ERROR(status)) return status;
+
+    kernel_entry(boot_info);
 
     return EFI_SUCCESS;
 
@@ -189,7 +199,9 @@ static EFI_STATUS validate_elf(void *file_image, u64 file_size) {
 
 }
 
-static EFI_STATUS load_elf(void *file_image, u64 file_size, void (**entry)(void)) {
+static EFI_STATUS load_elf(void *file_image, void (**kernel_entry)(BootInfo *)) {
+
+    EFI_STATUS status;
 
     Elf64_Executable_Header *e_header = (Elf64_Executable_Header *)file_image;
     Elf64_Program_Header *p_headers = (Elf64_Program_Header *)((u8 *)file_image + e_header->e_phoff);
@@ -201,8 +213,15 @@ static EFI_STATUS load_elf(void *file_image, u64 file_size, void (**entry)(void)
             continue;
         }
 
+        u64 pages = (p_headers[i].p_memsz + 4095) / 4096;
+
+        EFI_PHYSICAL_ADDRESS segment_address = p_headers[i].p_vaddr;
+
+        status = uefi_call_wrapper(BS->AllocatePages, 4, AllocateAddress, EfiLoaderCode, pages, &segment_address);
+        if (EFI_ERROR(status)) return status;
+
         u8 *source = (u8 *)file_image + p_headers[i].p_offset;
-        u8 *destination = (u8 *)p_headers[i].p_vaddr;
+        u8 *destination = (u8 *)segment_address;
 
         // Copy segment
         copy_memory(destination, source, p_headers[i].p_filesz);
@@ -213,9 +232,71 @@ static EFI_STATUS load_elf(void *file_image, u64 file_size, void (**entry)(void)
     }
     
     // Return entry
-    *entry = (void (*)(void))e_header->e_entry; 
+    *kernel_entry = (void (*)(BootInfo *))e_header->e_entry; 
 
     return EFI_SUCCESS;
+}
+
+//////////////////////////////////////////////////////////////////////////////////////
+
+static EFI_STATUS get_framebuffer(EFI_HANDLE image_handle, BootInfo *boot_info) {
+
+    EFI_STATUS status;
+
+    EFI_GRAPHICS_OUTPUT_PROTOCOL *gop = NULL;
+
+    // Get graphics output protocol
+    status = uefi_call_wrapper(BS->LocateProtocol, 3, &gEfiGraphicsOutputProtocolGuid, NULL, (void **)&gop);    if (EFI_ERROR(status)) return status;
+    if (EFI_ERROR(status)) return status;
+
+    boot_info->framebuffer.address = gop->Mode->FrameBufferBase;
+    boot_info->framebuffer.width = gop->Mode->Info->HorizontalResolution;
+    boot_info->framebuffer.height = gop->Mode->Info->VerticalResolution;
+    boot_info->framebuffer.pitch = gop->Mode->Info->PixelsPerScanLine;
+
+    return EFI_SUCCESS;
+
+}
+
+static EFI_STATUS exit_boot_services(EFI_HANDLE image_handle, BootInfo *boot_info) {
+
+    EFI_STATUS status;
+
+    u64 memory_map_key;
+    u64 memory_map_size = 0;
+    u64 memory_map_descriptor_size;
+    u64 memory_map_descriptor_version;
+
+    status = uefi_call_wrapper(BS->GetMemoryMap, 5, &memory_map_size, NULL, &memory_map_key, &memory_map_descriptor_size, &memory_map_descriptor_version);
+    if (status != EFI_BUFFER_TOO_SMALL) return status;
+
+    memory_map_size += (10 * memory_map_descriptor_size); 
+
+    status = uefi_call_wrapper(BS->AllocatePool, 3, EfiLoaderData, memory_map_size, &boot_info->memory_map.map);
+    if (EFI_ERROR(status)) return status;
+
+    status = uefi_call_wrapper(BS->GetMemoryMap, 5, &memory_map_size, boot_info->memory_map.map, &memory_map_key, &memory_map_descriptor_size, &memory_map_descriptor_version);
+    if (EFI_ERROR(status)) {
+        uefi_call_wrapper(BS->FreePool, 1, boot_info->memory_map.map);
+        return status;
+    }
+
+    boot_info->memory_map.size = memory_map_size;
+    boot_info->memory_map.descriptor_size = memory_map_descriptor_size;
+    boot_info->memory_map.descriptor_version = memory_map_descriptor_version;
+
+    status = uefi_call_wrapper(BS->ExitBootServices, 2, image_handle, memory_map_key);
+    if (status == EFI_INVALID_PARAMETER) {
+
+        status = uefi_call_wrapper(BS->GetMemoryMap, 5, &memory_map_size, boot_info->memory_map.map, &memory_map_key, &memory_map_descriptor_size, &memory_map_descriptor_version);
+        if (EFI_ERROR(status)) return status;
+
+        status = uefi_call_wrapper(BS->ExitBootServices, 2, image_handle, memory_map_key);
+    
+    }
+    
+    return status;
+
 }
 
 static void copy_memory(void *destination, const void *source, u64 size) {

@@ -2,4 +2,4 @@
 #include "types.h"
 #include "cub.h"
 
-__attribute__((ms_abi)) void kernel_main(void);
+void kernel_main(BootInfo *boot_info);

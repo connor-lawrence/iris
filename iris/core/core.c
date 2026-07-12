@@ -2,34 +2,54 @@
 #include "types.h"
 #include "cub.h"
 
-__attribute__((ms_abi)) void kernel_main(void) {
+/////////////////////////////////////////////////////////////////////////////////////
+
+static void debug_putchar(char c) {
     __asm__ volatile (
-        "mov $0xe9, %%dx\n\t"  // Load QEMU Debug Port into DX register
-        
-        "mov $91, %%al\n\t"     // '['
-        "out %%al, %%dx\n\t"
-
-        "mov $73, %%al\n\t"     // 'I'
-        "out %%al, %%dx\n\t"
-
-        "mov $114, %%al\n\t"    // 'r'
-        "out %%al, %%dx\n\t"
-
-        "mov $105, %%al\n\t"    // 'i'
-        "out %%al, %%dx\n\t"
-
-        "mov $115, %%al\n\t"    // 's'
-        "out %%al, %%dx\n\t"
-
-        "mov $93, %%al\n\t"     // ']'
-        "out %%al, %%dx\n\t"
-        
-        "mov $10, %%al\n\t"    // Newline '\n'
+        "mov %0, %%al\n\t"
+        "mov $0xe9, %%dx\n\t"
         "out %%al, %%dx\n\t"
         :
-        :
-        : "rax", "rdx"         // Tell compiler we are modifying these registers
+        : "r"(c)
+        : "rax", "rdx"
     );
+}
+
+static void debug_print_u64(u64 number) {
+    char buffer[20];
+    int i = 0;
+
+    if (number == 0) {
+        debug_putchar('0');
+        return;
+    }
+
+    while (number > 0) {
+        buffer[i++] = '0' + (number % 10);
+        number /= 10;
+    }
+
+    while (i > 0) {
+        debug_putchar(buffer[--i]);
+    }
+}
+
+void kernel_main(BootInfo *boot_info) {
+
+    debug_putchar('[');
+    debug_putchar('I');
+    debug_putchar('r');
+    debug_putchar('i');
+    debug_putchar('s');
+    debug_putchar(']');
+    debug_putchar('\n');
+
+    debug_print_u64(boot_info->framebuffer.width);
+    debug_putchar('\n');
+
+    debug_print_u64(boot_info->framebuffer.height);
+    debug_putchar('\n');
+
     while (1) {
         __asm__ volatile ("hlt");
     }
