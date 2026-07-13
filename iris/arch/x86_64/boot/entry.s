@@ -6,5 +6,6 @@ _start:
     call kernel_main
 
 .hang:
+    cli
     hlt
     jmp .hang

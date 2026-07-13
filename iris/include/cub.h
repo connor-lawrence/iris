@@ -32,7 +32,7 @@ typedef struct {
 typedef struct {
 
     struct {
-        u64 address;
+        void *address;
         u32 width;
         u32 height;
         u32 pitch;
@@ -40,9 +40,10 @@ typedef struct {
 
     struct {
         void *map;
-        u64 size;
-        u64 descriptor_size;
-        u64 descriptor_version;
-    } memory_map;
+        u64 map_size;
+        u64 map_descriptor_size;
+        u64 map_descriptor_version;
+        u64 map_key;
+    } memory;
 
 } BootInfo;

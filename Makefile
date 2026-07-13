@@ -21,14 +21,14 @@ KERNEL_OBJ := $(KERNEL_C_OBJ) $(KERNEL_S_OBJ)
 BOOTLOADER := $(KERNEL_DIR)/arch/x86_64/boot/uefi/cub.c
 
 # Flags
-KERNEL_GCC_FLAGS := -c -ffreestanding -fno-stack-protector -mno-red-zone -m64 \
+KERNEL_GCC_FLAGS := -c -ffreestanding -fno-pie -fno-stack-protector -mno-red-zone -m64 \
 	-I $(KERNEL_DIR)/include
-BOOTLOADER_GCC_FLAGS := -fno-stack-protector -fpic -fshort-wchar -mno-red-zone -DEFI_FUNCTION_WRAPPER -I /usr/include/efi -I /usr/include/efi/x86_64 \
+BOOTLOADER_GCC_FLAGS := -fno-pie -fpic -fno-stack-protector -fshort-wchar -mno-red-zone -DEFI_FUNCTION_WRAPPER -Wall -Wextra -I /usr/include/efi -I /usr/include/efi/x86_64 \
 	-I $(KERNEL_DIR)/include
 BOOTLOADER_LD_FLAGS := -nostdlib -T /usr/lib/elf_x86_64_efi.lds -shared -Bsymbolic -L /usr/lib -lgnuefi -lefi
 BOOTLOADER_OBJCOPY_FLAGS := -j .text -j .sdata -j .data -j .rodata -j .dynamic -j .dynsym -j .rel -j .rela -j .reloc --target=efi-app-x86_64
 
-all: $(BOOT_EFI) $(KERNEL_ELF) $(BUILD_DIR)/OVMF_VARS.fd
+all: $(KERNEL_ELF) $(BOOT_EFI) $(BUILD_DIR)/OVMF_VARS.fd
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
@@ -44,7 +44,7 @@ $(BUILD_DIR)/%.o: $(KERNEL_DIR)/%.c | $(BUILD_DIR)
 # Assemble kernel assembly files
 $(BUILD_DIR)/%.o: $(KERNEL_DIR)/%.s | $(BUILD_DIR)
 	mkdir -p $(dir $@)
-	gcc $(KERNEL_GCC_FLAGS) $< -o $@
+	gcc -c -m64 $< -o $@
 
 # Link kernel files
 $(KERNEL_ELF): $(KERNEL_OBJ)
