@@ -28,22 +28,3 @@ typedef struct {
     u64 p_memsz;
     u64 p_align;
 } Elf64_Program_Header;
-
-typedef struct {
-
-    struct {
-        void *address;
-        u32 width;
-        u32 height;
-        u32 pitch;
-    } framebuffer;
-
-    struct {
-        void *map;
-        u64 map_size;
-        u64 map_descriptor_size;
-        u64 map_descriptor_version;
-        u64 map_key;
-    } memory;
-
-} BootInfo;

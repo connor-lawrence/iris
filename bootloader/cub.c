@@ -3,6 +3,7 @@
 
 #include "types.h"
 #include "cub.h"
+#include "boot.h"
 
 // CUB v2.1
 #define KERNEL_FILE L"kernel.elf"
@@ -10,7 +11,7 @@
 // Function declarations
 static EFI_STATUS read_file(EFI_HANDLE image_handle, void **file_image, u64 *file_size);
 static EFI_STATUS validate_elf(void *file_image, u64 file_size);
-static EFI_STATUS load_elf(void *file_image, void (**kernel_entry)(BootInfo *));
+static EFI_STATUS load_elf(void *file_image, u64 *kernel_base, u64 *kernel_size, void (**kernel_entry)(BootInfo *));
 static EFI_STATUS get_framebuffer(BootInfo *boot_info);
 static EFI_STATUS get_memory_map(BootInfo *boot_info);
 static EFI_STATUS exit_boot_services(EFI_HANDLE image_handle, BootInfo *boot_info);
@@ -18,10 +19,11 @@ static EFI_STATUS exit_boot_services(EFI_HANDLE image_handle, BootInfo *boot_inf
 EFI_STATUS efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_table) {
 
     EFI_STATUS status = EFI_SUCCESS;
+    BootInfo *boot_info = NULL;
     void *kernel_image = NULL;
     u64 kernel_size = 0;
+    u64 kernel_base = 0;
     void (*kernel_entry)(BootInfo *) = NULL;
-    BootInfo *boot_info = NULL;
 
     InitializeLib(image_handle, system_table);
 
@@ -42,10 +44,13 @@ EFI_STATUS efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_table) {
         goto oc;
     }
 
-    status = load_elf(kernel_image, &kernel_entry);
+    status = load_elf(kernel_image, &kernel_base, &kernel_size, &kernel_entry);
     if (EFI_ERROR(status)) {
         goto oc;
     }
+
+    boot_info->memory.kernel_base = kernel_base;
+    boot_info->memory.kernel_size = kernel_size;
 
     uefi_call_wrapper(BS->FreePool, 1, kernel_image);
     kernel_image = NULL;
@@ -261,9 +266,12 @@ static EFI_STATUS validate_elf(void *file_image, u64 file_size) {
 
 }
 
-static EFI_STATUS load_elf(void *file_image, void (**kernel_entry)(BootInfo *)) {
+static EFI_STATUS load_elf(void *file_image, u64 *kernel_base, u64 *kernel_size, void (**kernel_entry)(BootInfo *)) {
 
     EFI_STATUS status;
+    *kernel_base = ~0ULL;
+    *kernel_size = 0;
+    u64 kernel_end = 0;
 
     Elf64_Executable_Header *e_header = (Elf64_Executable_Header *)file_image;
     Elf64_Program_Header *p_headers = (Elf64_Program_Header *)((u8 *)file_image + e_header->e_phoff);
@@ -273,6 +281,17 @@ static EFI_STATUS load_elf(void *file_image, void (**kernel_entry)(BootInfo *)) 
         // Skip segments that aren't PT_LOAD
         if (p_headers[i].p_type != 1) {
             continue;
+        }
+
+        // Set base to the lowest loaded segment address so far
+        if (p_headers[i].p_vaddr < *kernel_base) {
+            *kernel_base = p_headers[i].p_vaddr;
+        }
+
+        // Set the end to the highest loaded segment address so far
+        if (p_headers[i].p_vaddr + p_headers[i].p_memsz > kernel_end) {
+            kernel_end = p_headers[i].p_vaddr + p_headers[i].p_memsz;
+            *kernel_size = kernel_end - *kernel_base;
         }
 
         // Find the number of pages needed for the segment and allocate them
@@ -313,10 +332,11 @@ static EFI_STATUS get_framebuffer(BootInfo *boot_info) {
     if (EFI_ERROR(status)) return status;
 
     // Fill boot info with framebuffer information
-    boot_info->framebuffer.address = (void *)gop->Mode->FrameBufferBase;
+    boot_info->framebuffer.base = (void *)gop->Mode->FrameBufferBase;
     boot_info->framebuffer.width = gop->Mode->Info->HorizontalResolution;
     boot_info->framebuffer.height = gop->Mode->Info->VerticalResolution;
-    boot_info->framebuffer.pitch = gop->Mode->Info->PixelsPerScanLine;
+    boot_info->framebuffer.pixels_per_scanline = gop->Mode->Info->PixelsPerScanLine;
+    boot_info->framebuffer.pixel_format = gop->Mode->Info->PixelFormat;
 
     return EFI_SUCCESS;
 
@@ -325,37 +345,37 @@ static EFI_STATUS get_framebuffer(BootInfo *boot_info) {
 static EFI_STATUS get_memory_map(BootInfo *boot_info) {
 
     EFI_STATUS status;
-    u64 memory_map_key = 0;
-    u64 memory_map_size = 0;
-    u64 memory_map_descriptor_size = 0;
-    u64 memory_map_descriptor_version = 0;
+    u64 map_size = 0;
+    u64 map_descriptor_size = 0;
+    u32 map_descriptor_version = 0;
+    u64 map_key = 0;
 
     // Get size of memory map by failing successfully
-    status = uefi_call_wrapper(BS->GetMemoryMap, 5, &memory_map_size, NULL, &memory_map_key, &memory_map_descriptor_size, &memory_map_descriptor_version);
+    status = uefi_call_wrapper(BS->GetMemoryMap, 5, &map_size, NULL, &map_key, &map_descriptor_size, &map_descriptor_version);
     if (status != EFI_BUFFER_TOO_SMALL) {
         return status;
     }
 
     // Add extra space and allocate memory for memory map
-    memory_map_size += 4 * memory_map_descriptor_size;
+    map_size += 4 * map_descriptor_size;
 
-    status = uefi_call_wrapper(BS->AllocatePool, 3, EfiLoaderData, memory_map_size, &boot_info->memory.map);
+    status = uefi_call_wrapper(BS->AllocatePool, 3, EfiLoaderData, map_size, &boot_info->memory.map);
     if (EFI_ERROR(status)) {
         return status;
     }
 
     // Get memory map
-    status = uefi_call_wrapper(BS->GetMemoryMap, 5, &memory_map_size, boot_info->memory.map, &memory_map_key, &memory_map_descriptor_size, &memory_map_descriptor_version);
+    status = uefi_call_wrapper(BS->GetMemoryMap, 5, &map_size, boot_info->memory.map, &map_key, &map_descriptor_size, &map_descriptor_version);
     if (EFI_ERROR(status)) {
         uefi_call_wrapper(BS->FreePool, 1, boot_info->memory.map);
         return status;
     }
 
     // Fill boot info with memory map and metadata
-    boot_info->memory.map_size = memory_map_size;
-    boot_info->memory.map_descriptor_size = memory_map_descriptor_size;
-    boot_info->memory.map_descriptor_version = memory_map_descriptor_version;
-    boot_info->memory.map_key = memory_map_key;
+    boot_info->memory.map_size = map_size;
+    boot_info->memory.map_descriptor_size = map_descriptor_size;
+    boot_info->memory.map_descriptor_version = map_descriptor_version;
+    boot_info->memory.map_key = map_key;
 
     return EFI_SUCCESS;
 
@@ -371,7 +391,7 @@ static EFI_STATUS exit_boot_services(EFI_HANDLE image_handle, BootInfo *boot_inf
     if (status == EFI_INVALID_PARAMETER) {
 
         // Get new memory map
-        status = uefi_call_wrapper(BS->GetMemoryMap, 5, &boot_info->memory.map_size, boot_info->memory.map, &boot_info->memory.map_key, 
+        status = uefi_call_wrapper(BS->GetMemoryMap, 5, &boot_info->memory.map_size, boot_info->memory.map, &boot_info->memory.map_key,
             &boot_info->memory.map_descriptor_size, &boot_info->memory.map_descriptor_version);
         if (EFI_ERROR(status)) {
             return status;
