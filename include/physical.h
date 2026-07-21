@@ -17,3 +17,4 @@ typedef struct {
 } MemoryRegion;
 
 void memory_init(Memory *memory);
+void* physical_allocate_page(void);

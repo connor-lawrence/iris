@@ -29,6 +29,9 @@ void kernel_main(BootInfo *boot_info) {
 
     core_init(boot_info);
 
+    // Allocate a page
+    serial_print_hex("Allocated page @ ", (u64)physical_allocate_page(), "\n");
+
     // Halt
     while (1) {
         __asm__ volatile ("hlt");
